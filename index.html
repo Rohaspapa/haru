@@ -78,7 +78,7 @@
   .rcard-title{font-size:15px;font-weight:600;display:flex;align-items:center;gap:7px;}
   .rcard.done .rcard-title{color:var(--muted);}
   .level-tag{font-size:10px;font-weight:800;padding:2px 7px;border-radius:20px;background:var(--accent-soft);color:var(--accent);letter-spacing:.3px;}
-  .rcard-streak{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--fire);font-weight:800;margin-top:3px;}
+  .rcard-streak{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--fire);font-weight:800;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .rcard-streak.zero{color:var(--faint);font-weight:600;}
   .target-pill{font-size:11px;color:var(--muted);font-weight:600;background:var(--surface-2);padding:3px 9px;border-radius:20px;}
   .target-pill.hit{background:rgba(95,184,120,.15);color:var(--good);}
@@ -161,6 +161,10 @@
   .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--accent);color:#1a1500;padding:11px 20px;border-radius:30px;font-weight:700;font-size:14px;opacity:0;transition:.25s;z-index:60;pointer-events:none;}
   .toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
 
+  /* 주말 배너 */
+  .weekend-banner{background:linear-gradient(135deg,#1d2440,var(--surface));border:1px solid #2f3a5c;border-radius:12px;padding:11px 13px;margin-bottom:10px;font-size:13px;color:#aab3d6;line-height:1.5;}
+  .weekend-banner b{color:#c5cdf0;font-weight:700;}
+
   /* 패턴 그래프 */
   .chart-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:10px;}
   .chart-title{font-size:13px;font-weight:700;margin-bottom:3px;display:flex;align-items:center;gap:6px;}
@@ -206,6 +210,7 @@
   <div class="sec">
     <div class="sec-h"><span class="sec-t"><span class="ico">🔥</span>매일 쌓기</span>
       <span class="sec-sub" id="dailyCount"></span></div>
+    <div id="weekendBanner"></div>
     <div id="dailyList"></div>
   </div>
 
@@ -264,9 +269,9 @@
 <script>
 // ════════ 설정 ════════
 const DAILY_ROUTINES = [
-  {key:'read',  label:'독서',     target:'daily'},
-  {key:'econ',  label:'경제 공부', target:'daily'},
-  {key:'exercise', label:'운동', emoji:'🏃', target:3, time:'오전(식전, 11~12시)', link:true}
+  {key:'read',  label:'독서',     target:'daily'},                         // 매일, 주말도 기대(보호 없음)
+  {key:'econ',  label:'경제 공부', target:'daily', weekendProtect:true},   // 매일이지만 주말은 streak 보호
+  {key:'exercise', label:'운동', emoji:'🏃', target:3, time:'오전(식전, 11~12시)', link:true} // 주 3회 목표(연속 개념 없음)
 ];
 const AOKC_URL='https://rohaspapa.github.io/aokc/';
 const DEEP_SCHEDULE={
@@ -306,7 +311,21 @@ const hh=now.getHours();
 document.getElementById('greet').textContent=hh<5?'아직 깨어있네요':hh<11?'좋은 아침이에요':hh<17?'골든타임이에요':hh<22?'수고한 하루':'하루를 닫을 시간';
 
 function dayHas(k,rkey){const d=db.days[k];return !!(d&&d.routines&&d.routines[rkey]);}
-function streakOf(rkey){let s=0;const d=new Date(now);d.setHours(0,0,0,0);if(!dayHas(ymd(d),rkey))d.setDate(d.getDate()-1);while(dayHas(ymd(d),rkey)){s++;d.setDate(d.getDate()-1);}return s;}
+function isWeekend(dateObj){const wd=dateObj.getDay();return wd===0||wd===6;}
+// streak 계산. protect=true면 주말(토·일)에 안 한 날은 연속을 끊지 않고 건너뜀.
+function streakOf(rkey,protect){
+  let s=0;const d=new Date(now);d.setHours(0,0,0,0);
+  // 오늘 아직 안 했으면 어제부터(오늘은 진행 중일 수 있음)
+  if(!dayHas(ymd(d),rkey))d.setDate(d.getDate()-1);
+  let guard=0;
+  while(guard++<3650){
+    if(dayHas(ymd(d),rkey)){s++;d.setDate(d.getDate()-1);continue;}
+    // 안 한 날
+    if(protect&&isWeekend(d)){d.setDate(d.getDate()-1);continue;} // 주말은 건너뜀(보호)
+    break; // 평일에 안 했으면(또는 보호 없으면) 끊김
+  }
+  return s;
+}
 function daysAgo(n){const d=new Date(now);d.setHours(0,0,0,0);d.setDate(d.getDate()-n);return d;}
 function countSince(rkey,startDate){let c=0;Object.keys(db.days).forEach(k=>{if(k>=startDate&&dayHas(k,rkey))c++;});return c;}
 function weekStart(){const d=new Date(now);d.setHours(0,0,0,0);const wd=(d.getDay()+6)%7;d.setDate(d.getDate()-wd);return ymd(d);}
@@ -318,17 +337,29 @@ function grassCells(rkey){let html='';for(let i=27;i>=0;i--){const k=ymd(daysAgo
 function renderDaily(){
   const list=document.getElementById('dailyList');list.innerHTML='';
   let doneToday=0;
+  const todayIsWeekend=isWeekend(now);
   DAILY_ROUTINES.forEach(r=>{
     const isDone=!!today.routines[r.key];
     if(isDone)doneToday++;
-    const streak=streakOf(r.key);
+    const isWeekly=(typeof r.target==='number');     // 운동: 주간 목표형
+    const protect=!!r.weekendProtect;                 // 경제: 주말 보호형
+    const streak=isWeekly?0:streakOf(r.key,protect);
     const wk=countSince(r.key,weekStart()), mo=countSince(r.key,monthStart()), yr=countSince(r.key,yearStart());
     const total=totalCount(r.key);
     const lvl=levelOf(total);
     const isOpen=openCard===r.key;
     let targetPill;
-    if(r.target==='daily'){targetPill=`<span class="target-pill ${isDone?'hit':''}">매일</span>`;}
-    else{const hit=wk>=r.target;targetPill=`<span class="target-pill ${hit?'hit':''}">주 ${wk}/${r.target}${hit?' ✓':''}</span>`;}
+    if(isWeekly){const hit=wk>=r.target;targetPill=`<span class="target-pill ${hit?'hit':''}">주 ${wk}/${r.target}${hit?' ✓':''}</span>`;}
+    else{targetPill=`<span class="target-pill ${isDone?'hit':''}">매일${protect?' · 주말보호':''}</span>`;}
+    // 둘째 줄(streak 또는 주간 안내)
+    let subLine;
+    if(isWeekly){
+      const left=Math.max(0,r.target-wk);
+      subLine=`<div class="rcard-streak ${wk>=r.target?'':'zero'}">${wk>=r.target?`✅ 이번 주 목표 달성 (${wk}회)`:`이번 주 ${wk}/${r.target} · ${left}번 더`}</div>`;
+    }else{
+      const protectedNote=(protect&&todayIsWeekend&&!isDone)?' <span style="color:var(--faint);font-weight:600;white-space:nowrap">· 주말 OK</span>':'';
+      subLine=`<div class="rcard-streak ${streak===0?'zero':''}">${streak>0?`🔥 ${streak}일 연속`:'오늘 시작해요'}${protectedNote}</div>`;
+    }
     const card=document.createElement('div');
     card.className='rcard'+(isDone?' done':'')+(isOpen?' open':'');
     card.innerHTML=`
@@ -336,7 +367,7 @@ function renderDaily(){
         <div class="rck"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#1a1500" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
         <div class="rcard-mid">
           <div class="rcard-title">${r.emoji?r.emoji+' ':''}${r.label} <span class="level-tag">${lvl.name}</span></div>
-          <div class="rcard-streak ${streak===0?'zero':''}">${streak>0?`🔥 ${streak}일 연속`:'오늘 시작해요'}</div>
+          ${subLine}
         </div>
         ${targetPill}
         <span class="expand">${isOpen?'▴':'▾'}</span>
@@ -360,6 +391,10 @@ function renderDaily(){
     list.appendChild(card);
   });
   document.getElementById('dailyCount').textContent=`오늘 ${doneToday}/${DAILY_ROUTINES.length}`;
+  const wb=document.getElementById('weekendBanner');
+  if(isWeekend(now)){
+    wb.innerHTML=`<div class="weekend-banner">🌿 <b>주말이에요.</b> 독서만 가볍게, 나머지는 쉬어가도 연속이 안 끊겨요. 시간 나면 체크해서 보너스로 쌓으세요.</div>`;
+  }else{wb.innerHTML='';}
 }
 
 function calcSleepStreak(field){let s=0;const d=new Date(now);d.setHours(0,0,0,0);if(!(db.days[ymd(d)]&&db.days[ymd(d)][field]))d.setDate(d.getDate()-1);while(db.days[ymd(d)]&&db.days[ymd(d)][field]){s++;d.setDate(d.getDate()-1);}return s;}
