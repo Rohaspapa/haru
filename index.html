@@ -168,6 +168,8 @@
   /* 취침 시트 */
   .sheet-btn{width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:11px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;}
   .sheet-btn.primary{background:var(--sleep);border-color:var(--sleep);color:#0f1115;}
+  .sheet-btn.primary.wake{background:var(--wake);border-color:var(--wake);}
+  .time-input.wake:focus{border-color:var(--wake);}
   .sheet-btn.ghost{background:none;border:none;color:var(--faint);font-weight:600;font-size:13px;margin-top:4px;}
   .sheet-or{text-align:center;font-size:12px;color:var(--faint);margin:6px 0 10px;}
   .time-input{flex:1;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:11px;padding:12px 13px;font-size:16px;outline:none;}
@@ -292,6 +294,21 @@
       <button class="sheet-btn" onclick="saveBedManual()">저장</button>
     </div>
     <button class="sheet-btn ghost" onclick="clearBed()">기록 지우기</button>
+  </div>
+</div>
+
+<div class="modal" id="wakeSheet">
+  <div class="modal-inner" style="max-height:auto">
+    <div class="modal-h"><h3>☀️ 기상 기록</h3><span class="x" onclick="closeWakeSheet()">×</span></div>
+    <div id="wakeSheetStatus" style="font-size:13px;color:var(--muted);margin-bottom:14px;"></div>
+    <p style="font-size:13px;color:var(--faint);line-height:1.55;margin:0 0 14px;">일어나자마자 눌러도 되고, 깜빡했으면 일어난 시각을 직접 입력하세요. 인정 범위는 <b style="color:#9fd5de">05:30~07:00</b>이에요.</p>
+    <button class="sheet-btn primary wake" onclick="saveWakeNow()">지금 시각으로 기록</button>
+    <div class="sheet-or">또는 시각 직접 입력</div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="time" id="wakeTimeInput" class="time-input wake">
+      <button class="sheet-btn" onclick="saveWakeManual()">저장</button>
+    </div>
+    <button class="sheet-btn ghost" onclick="clearWake()">기록 지우기</button>
   </div>
 </div>
 
@@ -500,15 +517,7 @@ function renderSleep(){
 }
 // 취침: 탭하면 [지금 체크 / 직접 입력 / 취소] 선택. 잠들기 전 못 누른 경우 아침에 입력.
 document.getElementById('bedTile').onclick=()=>{ openBedSheet(); };
-// 기상: 탭하면 현재 시각 기록(토글). 일어나서 바로 누르는 용도.
-document.getElementById('wakeTile').onclick=()=>{
-  if(today.times.wake!=null){ // 이미 기록됨 → 해제
-    delete today.times.wake; today.wake=false;
-  }else{
-    today.times.wake=nowMinutes(); today.wake=true;
-  }
-  persist();renderSleep();renderPattern();
-};
+document.getElementById('wakeTile').onclick=()=>{ openWakeSheet(); };
 
 function renderDeep(){
   const list=document.getElementById('deepList');list.innerHTML='';
@@ -720,6 +729,30 @@ function saveBedManual(){
   persist();renderSleep();renderPattern();closeBedSheet();
 }
 function clearBed(){delete today.times.bed;today.bed=false;persist();renderSleep();renderPattern();closeBedSheet();}
+
+// 기상 입력 시트
+function openWakeSheet(){
+  const cur=today.times.wake;
+  const m=document.getElementById('wakeSheet');
+  m.querySelector('#wakeTimeInput').value = cur!=null ? fmtTime(cur) : '06:00';
+  m.querySelector('#wakeSheetStatus').textContent = cur!=null
+    ? `현재 기록: ${fmtTime(cur)}${wakeInWindow(cur)?' (인정 범위 안)':' (범위 밖)'}` : '아직 기록 없음';
+  m.classList.add('on');
+}
+function closeWakeSheet(){document.getElementById('wakeSheet').classList.remove('on');}
+function saveWakeNow(){
+  today.times.wake=nowMinutes(); today.wake=true;
+  persist();renderSleep();renderPattern();closeWakeSheet();
+}
+function saveWakeManual(){
+  const v=document.getElementById('wakeTimeInput').value;
+  if(!v)return;
+  const parts=v.split(':'); let mm=parseInt(parts[0])*60+parseInt(parts[1]);
+  if(isNaN(mm))return;
+  today.times.wake=mm; today.wake=true;
+  persist();renderSleep();renderPattern();closeWakeSheet();
+}
+function clearWake(){delete today.times.wake;today.wake=false;persist();renderSleep();renderPattern();closeWakeSheet();}
 
 
 function escapeHtml(s){return(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
