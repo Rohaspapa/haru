@@ -1,6 +1,6 @@
 {
-  "name": "하루",
-  "short_name": "하루",
+  "name": "피다",
+  "short_name": "피다",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0f1115",
