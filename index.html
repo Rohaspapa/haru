@@ -395,7 +395,14 @@ const KEY='haru_v3';
 function ymd(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 const now=new Date(); const tk=ymd(now);
 function load(){try{return JSON.parse(localStorage.getItem(KEY))||{days:{}}}catch{return {days:{}}}}
-function save(){localStorage.setItem(KEY,JSON.stringify(db));}
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify(db));return true;}
+  catch(e){
+    // 용량 초과 또는 사파리 프라이빗 모드 등
+    alert('⚠ 저장에 실패했어요. 브라우저 저장공간이 가득 찼거나 프라이빗 모드일 수 있어요.\n백업·복원 메뉴에서 데이터를 백업해두세요.');
+    return false;
+  }
+}
 let db=load(); if(!db.days)db.days={};
 function getDay(k){if(!db.days[k])db.days[k]={bed:false,wake:false,routines:{},counts:{},deep:{},tasks:[],log:'',mood:'',money:[],times:{}};if(!db.days[k].times)db.days[k].times={};if(!db.days[k].counts)db.days[k].counts={};return db.days[k];}
 // 현재 시각을 분 단위(0~1439)로. 취침은 자정 넘으면 +1440으로 보정해 그래프 연속성 유지
@@ -547,10 +554,14 @@ function calcSleepStreak(field){
   return s;
 }
 function renderSleep(){
-  const bedT=today.times.bed, wakeT=today.times.wake;
+  const h=new Date().getHours();
+  const morning=(h>=5&&h<15);
+  // 아침에는 '어젯밤 취침'을 타일에 표시 (오늘 밤은 아직이므로)
+  const bedDay = morning ? (db.days[ymd(daysAgo(1))]||{times:{}}) : today;
+  const bedT=bedDay.times?bedDay.times.bed:null;
+  const wakeT=today.times.wake;
   const bedOk=bedInWindow(bedT), wakeOk=wakeInWindow(wakeT);
   const bedTile=document.getElementById('bedTile'), wakeTile=document.getElementById('wakeTile');
-  // done 클래스는 '범위 안'일 때만 (색 채움)
   bedTile.classList.toggle('done',bedOk);
   wakeTile.classList.toggle('done',wakeOk);
   bedTile.classList.toggle('out', bedT!=null && !bedOk);
@@ -558,7 +569,7 @@ function renderSleep(){
   document.getElementById('bedStreak').textContent=calcSleepStreak('bed');
   document.getElementById('wakeStreak').textContent=calcSleepStreak('wake');
   document.getElementById('bedSub').textContent =
-    bedT==null ? '탭해서 기록' : bedOk ? `${fmtTime(bedT)} 취침 ✓` : `${fmtTime(bedT)} · 범위 밖`;
+    bedT==null ? '탭해서 기록' : (morning?'어젯밤 ':'')+(bedOk ? `${fmtTime(bedT)} 취침 ✓` : `${fmtTime(bedT)} · 범위 밖`);
   document.getElementById('wakeSub').textContent =
     wakeT==null ? '탭해서 기록' : wakeOk ? `${fmtTime(wakeT)} 기상 ✓` : `${fmtTime(wakeT)} · 범위 밖`;
 }
@@ -656,7 +667,11 @@ function renderTimeline(){
   keys.forEach(k=>{const d=db.days[k];const parts=k.split('-');
     const rdone=Object.values(d.routines||{}).filter(Boolean).length;
     const spend=d.money.filter(m=>m.type==='spend').reduce((a,b)=>a+b.amt,0);
-    let meta=[];if(d.bed)meta.push('🌙');if(d.wake)meta.push('☀️');if(rdone)meta.push(`🔥${rdone}`);if(spend>0)meta.push(`-${spend.toLocaleString()}원`);
+    let meta=[];
+    const bt=d.times?d.times.bed:null, wt=d.times?d.times.wake:null;
+    if(bedInWindow(bt))meta.push('🌙');else if(bt!=null)meta.push('🌙⚠');
+    if(wakeInWindow(wt))meta.push('☀️');else if(wt!=null)meta.push('☀️⚠');
+    if(rdone)meta.push(`🔥${rdone}`);if(spend>0)meta.push(`-${spend.toLocaleString()}원`);
     const card=document.createElement('div');card.className='day-card';
     card.innerHTML=`<div class="d-date">${parseInt(parts[1])}월 ${parseInt(parts[2])}일 ${d.mood||''}</div>${d.log&&d.log.trim()?`<div class="d-log">${escapeHtml(d.log)}</div>`:'<div class="d-log" style="color:var(--faint)">(기록 없음)</div>'}${meta.length?`<div class="d-meta">${meta.map(x=>`<span>${x}</span>`).join('')}</div>`:''}`;
     tl.appendChild(card);});
@@ -678,9 +693,8 @@ function buildSleepChart(){
   const keys=last7Keys();
   const W=320,H=150,padL=34,padR=10,padT=14,padB=22;
   const plotW=W-padL-padR, plotH=H-padT-padB;
-  // y범위: 취침(보정값, 보통 1320~1560=22~26시) + 기상(300~540=5~9시)
-  // 두 지표를 한 축에 두기 위해 "잠자리 사이클" 축으로: 21:00(1260) ~ 다음날 09:00(1980)
-  const yMin=1260, yMax=1980; // 분
+  // y범위: 이른 취침도 인정되므로 20:00(1200)부터 ~ 다음날 09:00(1980)까지
+  const yMin=1200, yMax=1980; // 분
   function yPos(min){let m=min;if(m<720)m+=1440;m=Math.max(yMin,Math.min(yMax,m));return padT+plotH*(m-yMin)/(yMax-yMin);}
   function xPos(i){return padL+plotW*i/6;}
   // 목표선
@@ -752,17 +766,32 @@ function renderSleepChart(){renderPattern();} // 호환용 별칭
 
 // 취침 입력 시트: 지금 체크 / 직접 입력 / 해제
 function openBedSheet(){
-  const cur=today.times.bed;
+  const h=new Date().getHours();
+  const morning=(h>=5&&h<15);
+  // 아침이면 '어젯밤 취침' 기록을 다룸
+  const targetDay = morning ? getDay(ymd(daysAgo(1))) : today;
+  const cur=targetDay.times.bed;
   const m=document.getElementById('bedSheet');
-  const inputDefault = cur!=null ? fmtTime(cur) : '23:00';
-  m.querySelector('#bedTimeInput').value=inputDefault;
-  m.querySelector('#bedSheetStatus').textContent = cur!=null
-    ? `현재 기록: ${fmtTime(cur)}${bedInWindow(cur)?' (인정 범위 안)':' (범위 밖)'}` : '아직 기록 없음';
+  m.querySelector('#bedTimeInput').value = cur!=null ? fmtTime(cur) : '23:00';
+  m.querySelector('#bedSheetStatus').textContent = (morning?'어젯밤 — ':'') + (cur!=null
+    ? `현재 기록: ${fmtTime(cur)}${bedInWindow(cur)?' (인정)':' (범위 밖)'}` : '아직 기록 없음');
   m.classList.add('on');
 }
 function closeBedSheet(){document.getElementById('bedSheet').classList.remove('on');}
 function saveBedNow(){
-  let m=nowMinutes(); if(m<720)m+=1440; // 자정 이후면 보정
+  let m=nowMinutes();
+  if(m<720)m+=1440; // 자정 이후면 보정
+  // 새벽(0~5시)에 취침 체크하면 '어제'의 취침으로 기록 (자정 넘겨 잔 것)
+  const h=new Date().getHours();
+  if(h<5){
+    const yk=ymd(daysAgo(1));
+    const yday=getDay(yk);
+    yday.times.bed=m; yday.bed=true;
+    db.days[yk]=yday;
+    save(); flash('어제 취침으로 기록됨');
+    renderSleep();renderPattern();closeBedSheet();
+    return;
+  }
   today.times.bed=m; today.bed=true;
   persist();renderSleep();renderPattern();closeBedSheet();
 }
@@ -772,10 +801,30 @@ function saveBedManual(){
   const parts=v.split(':'); let mm=parseInt(parts[0])*60+parseInt(parts[1]);
   if(isNaN(mm))return;
   if(mm<720)mm+=1440; // 0~11시대 입력은 자정 이후 취침으로 보정
+  // 아침(5~12시)에 입력하는 취침 시각은 '어젯밤' 것 → 어제 기록에 저장
+  const h=new Date().getHours();
+  if(h>=5&&h<15){
+    const yk=ymd(daysAgo(1));
+    const yday=getDay(yk);
+    yday.times.bed=mm; yday.bed=true;
+    db.days[yk]=yday;
+    save(); flash('어젯밤 취침으로 기록됨');
+    renderSleep();renderPattern();closeBedSheet();
+    return;
+  }
   today.times.bed=mm; today.bed=true;
   persist();renderSleep();renderPattern();closeBedSheet();
 }
-function clearBed(){delete today.times.bed;today.bed=false;persist();renderSleep();renderPattern();closeBedSheet();}
+function clearBed(){
+  const h=new Date().getHours();
+  if(h>=5&&h<15){
+    const yk=ymd(daysAgo(1));
+    if(db.days[yk]){delete db.days[yk].times.bed;db.days[yk].bed=false;save();}
+  }else{
+    delete today.times.bed;today.bed=false;persist();
+  }
+  renderSleep();renderPattern();closeBedSheet();
+}
 
 // 기상 입력 시트
 function openWakeSheet(){
@@ -806,7 +855,7 @@ function escapeHtml(s){return(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 
 
 let saveTimer;
-function persist(){db.days[tk]=today;clearTimeout(saveTimer);saveTimer=setTimeout(()=>{save();flash('저장됨');},400);}
+function persist(){db.days[tk]=today;clearTimeout(saveTimer);saveTimer=setTimeout(()=>{if(save())flash('저장됨');},400);}
 function flash(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),1100);}
 
 // ════════ 백업 · 복원 ════════
@@ -857,6 +906,11 @@ function loadBackupFile(ev){
 }
 
 renderSleep();renderDaily();renderDeep();renderTasks();renderMoney();renderRecall();renderPattern();
+
+// 앱이 백그라운드에 있다가 돌아왔을 때 날짜가 바뀌었으면 새로고침 (어제 날짜에 계속 기록되는 것 방지)
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&ymd(new Date())!==tk){location.reload();}
+});
 </script>
 </body>
 </html>
